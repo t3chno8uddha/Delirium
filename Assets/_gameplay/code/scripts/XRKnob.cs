@@ -97,7 +97,7 @@ namespace UnityEngine.XR.Content.Interaction
         bool m_ClampedMotion = true;
 
         [SerializeField]
-        [Tooltip("When enabled, setting 'value' directly in code (e.g. via a UnityEvent on Select Exited) will NOT snap the handle's visual rotation to match. The handle keeps whatever rotation it last had from being dragged; only the underlying value resets. Rotation while actively grabbed is unaffected by this setting either way.")]
+        [Tooltip("When enabled, setting 'value' directly in code (e.g. via a UnityEvent on Select Exited) will NOT snap the handle's visual rotation to match. The handle keeps whatever rotation it last had; only the underlying value resets. While actively grabbed, the handle spins continuously at a rate driven by how far it's twisted from the grab start (hold it turned = constant spin speed), while 'value' still reflects that twist offset directly. Releasing stops the spin immediately, unless Use Momentum is also enabled.")]
         bool m_DecoupleVisualFromValue = false;
 
         [SerializeField]
@@ -121,6 +121,14 @@ namespace UnityEngine.XR.Content.Interaction
         float m_TwistSensitivity = 1.5f;
 
         [SerializeField]
+        [Tooltip("When enabled (and Decouple Visual From Value is on), releasing the wheel while it's spinning makes it coast at its last spin rate and decelerate via friction to a stop, instead of halting immediately.")]
+        bool m_UseMomentum = false;
+
+        [SerializeField]
+        [Tooltip("How quickly momentum decays after release, in degrees/sec^2. Higher values stop the wheel sooner. Only used when Use Momentum is enabled.")]
+        float m_Friction = 180.0f;
+
+        [SerializeField]
         [Tooltip("Events to trigger when the knob is rotated")]
         ValueChangeEvent m_OnValueChange = new ValueChangeEvent();
 
@@ -135,10 +143,26 @@ namespace UnityEngine.XR.Content.Interaction
 
         float m_BaseKnobRotation = 0.0f;
 
-        // The gap between the handle's actual visual angle and the value-derived angle at the
-        // moment a grab starts, when decoupled. Held constant for the whole grab so the mesh
-        // keeps moving by the same delta as the hand, without ever being forced to match value.
-        float m_VisualOffset = 0.0f;
+        // While decoupled and grabbed, the mesh doesn't track a position at all - it spins
+        // continuously at a rate driven by how far the controller is twisted from the grab
+        // start. This accumulates that spin every frame. It intentionally is not wrapped to
+        // 0-360 so the rate math stays continuous; SetKnobRotation() handles display wrapping.
+        float m_VisualSpinAngle = 0.0f;
+
+        // Kept in sync with the live twist offset while grabbed. On release, if momentum is
+        // enabled, this becomes the coasting spin rate and decays toward zero via friction
+        // instead of being zeroed out immediately.
+        float m_MomentumOffset = 0.0f;
+
+        // True while the wheel is coasting on momentum after release (ungrabbed).
+        bool m_IsCoasting = false;
+
+        // The "at rest" value for decoupled/momentum wheels, captured once at startup and never
+        // touched again. Momentum and live decoupled input both express value as an offset from
+        // this fixed point, so releasing always settles back to the same rest value - it can't
+        // drift over repeated grab/release cycles the way re-deriving it from m_Value each grab
+        // would (e.g. if you grab again before a previous coast has fully settled).
+        float m_RestValue = 0.5f;
 
         /// <summary>
         /// The object that is visually grabbed and manipulated
@@ -174,7 +198,10 @@ namespace UnityEngine.XR.Content.Interaction
 
         /// <summary>
         /// When enabled, setting <see cref="value"/> directly in code will not snap the handle's
-        /// visual rotation to match. Rotation while actively grabbed is unaffected either way.
+        /// visual rotation to match. While actively grabbed, the handle spins continuously at a
+        /// rate driven by how far it's twisted from the grab start, while <see cref="value"/>
+        /// still reflects that twist offset directly. Releasing stops the spin immediately,
+        /// unless <see cref="useMomentum"/> is also enabled.
         /// </summary>
         public bool decoupleVisualFromValue
         {
@@ -201,6 +228,27 @@ namespace UnityEngine.XR.Content.Interaction
         }
 
         /// <summary>
+        /// When enabled (and <see cref="decoupleVisualFromValue"/> is on), releasing the wheel
+        /// while it's spinning makes it coast at its last spin rate and decelerate via friction
+        /// to a stop, instead of halting immediately.
+        /// </summary>
+        public bool useMomentum
+        {
+            get => m_UseMomentum;
+            set => m_UseMomentum = value;
+        }
+
+        /// <summary>
+        /// How quickly momentum decays after release, in degrees/sec^2. Only used when
+        /// <see cref="useMomentum"/> is enabled.
+        /// </summary>
+        public float friction
+        {
+            get => m_Friction;
+            set => m_Friction = value;
+        }
+
+        /// <summary>
         /// The position of the interactor controls rotation when outside this radius
         /// </summary>
         public float positionTrackedRadius
@@ -216,6 +264,7 @@ namespace UnityEngine.XR.Content.Interaction
 
         void Start()
         {
+            m_RestValue = m_Value;
             SetValue(m_Value);
             SetKnobRotation(ValueToRotation());
         }
@@ -231,6 +280,8 @@ namespace UnityEngine.XR.Content.Interaction
         {
             selectEntered.RemoveListener(StartGrab);
             selectExited.RemoveListener(EndGrab);
+            m_MomentumOffset = 0.0f;
+            m_IsCoasting = false;
             base.OnDisable();
         }
 
@@ -244,9 +295,9 @@ namespace UnityEngine.XR.Content.Interaction
 
             UpdateBaseKnobRotation();
 
-            m_VisualOffset = (m_DecoupleVisualFromValue && m_Handle != null)
-                ? m_Handle.localEulerAngles.y - m_BaseKnobRotation
-                : 0.0f;
+            // Start the spin integrator from wherever the mesh currently sits, so a decoupled
+            // grab never causes a visual snap at the start of the grab.
+            m_VisualSpinAngle = m_Handle != null ? m_Handle.localEulerAngles.y : 0.0f;
 
             UpdateRotation(true);
         }
@@ -254,6 +305,18 @@ namespace UnityEngine.XR.Content.Interaction
         void EndGrab(SelectExitEventArgs args)
         {
             m_Interactor = null;
+
+            // Hand off the last live spin rate to momentum coasting, if enabled. Otherwise
+            // stop immediately, same as before this feature existed.
+            if (m_DecoupleVisualFromValue && m_UseMomentum)
+            {
+                m_IsCoasting = Mathf.Abs(m_MomentumOffset) > 0.01f;
+            }
+            else
+            {
+                m_MomentumOffset = 0.0f;
+                m_IsCoasting = false;
+            }
         }
 
         public override void ProcessInteractable(XRInteractionUpdateOrder.UpdatePhase updatePhase)
@@ -265,6 +328,10 @@ namespace UnityEngine.XR.Content.Interaction
                 if (isSelected)
                 {
                     UpdateRotation();
+                }
+                else if (m_IsCoasting)
+                {
+                    UpdateMomentum();
                 }
             }
         }
@@ -342,20 +409,75 @@ namespace UnityEngine.XR.Content.Interaction
             else
                 m_ForwardVectorAngles.SetTargetFromVector(localForward);
 
-            // Apply offset to base knob rotation to get new knob rotation
-            var knobRotation = m_BaseKnobRotation - ((m_UpVectorAngles.totalOffset + m_ForwardVectorAngles.totalOffset) * m_TwistSensitivity) - m_PositionAngles.totalOffset;
+            // Raw, unclamped knob rotation driven purely by interactor motion
+            var rawKnobRotation = m_BaseKnobRotation - ((m_UpVectorAngles.totalOffset + m_ForwardVectorAngles.totalOffset) * m_TwistSensitivity) - m_PositionAngles.totalOffset;
 
-            // Clamp to range
+            // How far the controller is currently twisted away from where the grab started.
+            // This drives both the emitted value and, when decoupled, the mesh's spin rate.
+            var offsetFromBase = rawKnobRotation - m_BaseKnobRotation;
+
+            // Keep this in sync every frame so EndGrab always has the last live rate on hand,
+            // in case momentum coasting picks up from here.
+            m_MomentumOffset = offsetFromBase;
+
+            // Clamp to range - this clamped version drives the value calculation below
+            var knobRotation = rawKnobRotation;
             if (m_ClampedMotion)
                 knobRotation = Mathf.Clamp(knobRotation, m_MinAngle, m_MaxAngle);
 
-            // The mesh gets the visual offset added (0 when not decoupled); value math below
-            // always uses the un-offset knobRotation, so value tracking is unaffected either way.
-            SetKnobRotation(knobRotation + m_VisualOffset);
+            if (m_DecoupleVisualFromValue)
+            {
+                // Spin continuously: the further the twist offset, the faster the mesh keeps
+                // turning, every frame, for as long as the offset is held. No offset means no
+                // spin. This never snaps to a position, so it never "freezes" at a value.
+                m_VisualSpinAngle += offsetFromBase * Time.deltaTime;
+                SetKnobRotation(m_VisualSpinAngle);
 
-            // Reverse to get value
-            var knobValue = (knobRotation - m_MinAngle) / (m_MaxAngle - m_MinAngle);
-            SetValue(knobValue);
+                // Anchor to the fixed rest value, not m_BaseKnobRotation - m_BaseKnobRotation
+                // is re-derived from m_Value at the start of every grab, so it can drift if a
+                // new grab starts before a previous momentum coast has fully settled. m_RestValue
+                // never changes, so releasing always settles back to the same value.
+                var speedValue = m_RestValue + offsetFromBase / (m_MaxAngle - m_MinAngle);
+                if (m_ClampedMotion)
+                    speedValue = Mathf.Clamp01(speedValue);
+                SetValue(speedValue);
+            }
+            else
+            {
+                // Coupled: mesh tracks the (possibly clamped) position directly, as before.
+                SetKnobRotation(knobRotation);
+
+                // Reverse the clamped rotation to get value, so value tracking respects the limits
+                var positionValue = (knobRotation - m_MinAngle) / (m_MaxAngle - m_MinAngle);
+                SetValue(positionValue);
+            }
+        }
+
+        void UpdateMomentum()
+        {
+            // Decelerate the offset toward zero at a constant rate (friction), then keep
+            // spinning and reporting value from whatever offset remains - same math as the
+            // live grabbed path, just driven by a decaying virtual offset instead of a real one.
+            var decay = m_Friction * Time.deltaTime;
+            if (Mathf.Abs(m_MomentumOffset) <= decay)
+            {
+                m_MomentumOffset = 0.0f;
+                m_IsCoasting = false;
+            }
+            else
+            {
+                m_MomentumOffset -= decay * Mathf.Sign(m_MomentumOffset);
+            }
+
+            m_VisualSpinAngle += m_MomentumOffset * Time.deltaTime;
+            SetKnobRotation(m_VisualSpinAngle);
+
+            // Same fixed-rest-value anchor as the live grabbed path - always settles back to
+            // m_RestValue exactly as m_MomentumOffset decays to 0, never a drifted baseline.
+            var speedValue = m_RestValue + m_MomentumOffset / (m_MaxAngle - m_MinAngle);
+            if (m_ClampedMotion)
+                speedValue = Mathf.Clamp01(speedValue);
+            SetValue(speedValue);
         }
 
         void SetKnobRotation(float angle)

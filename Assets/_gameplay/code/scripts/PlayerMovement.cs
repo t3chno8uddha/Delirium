@@ -45,6 +45,8 @@ public class PlayerMovement : MonoBehaviour
         wheel_velocity_l = Mathf.Lerp(wheel_velocity_l, wheel_velocity.x, inputSmooth * Time.deltaTime);
         wheel_velocity_r = Mathf.Lerp(wheel_velocity_r, wheel_velocity.y, inputSmooth * Time.deltaTime);
 
+        wheel_velocity = Vector2.zero;
+
         // Return smoothed input vector
         return new Vector3(wheel_velocity_l, wheel_velocity_r, 0);
     }
