@@ -307,7 +307,7 @@ MonoBehaviour:
   m_PositionTrackedRadius: 0.1
   m_TwistSensitivity: -1
   m_UseMomentum: 1
-  m_Friction: 180
+  m_Friction: 360
   m_OnValueChange:
     m_PersistentCalls:
       m_Calls:
@@ -2363,7 +2363,7 @@ MonoBehaviour:
   m_PositionTrackedRadius: 0.1
   m_TwistSensitivity: -1
   m_UseMomentum: 1
-  m_Friction: 180
+  m_Friction: 360
   m_OnValueChange:
     m_PersistentCalls:
       m_Calls:
