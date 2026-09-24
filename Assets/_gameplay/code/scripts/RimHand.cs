@@ -32,6 +32,9 @@ namespace Delirium.Wheelchair
         [Tooltip("Trigger (index finger pinch). Either this or Grip Action can hold a rim - use the same action the hand animator reads for Trigger.")]
         [SerializeField] InputActionProperty pinchAction;
 
+        [Tooltip("Thumbstick or touchpad on this controller. Read by anything this hand holds that wants an analogue input, like the chair's joystick.")]
+        [SerializeField] InputActionProperty thumbstickAction;
+
         [SerializeField] HapticImpulsePlayer haptics;
 
         [Tooltip("Optional XRI interactor on this hand. It can't select anything while this hand holds a rim, and a hand already holding an XRI object won't grab rims.")]
@@ -101,6 +104,7 @@ namespace Delirium.Wheelchair
         PushRim grippedRim;
         PushRim nearRim;
         bool gripHeld;
+        bool pinchHeld;
 
         Vector3 visualOffsetPosition;
         Quaternion visualOffsetRotation;
@@ -123,8 +127,29 @@ namespace Delirium.Wheelchair
         /// <summary>True while grip or trigger is squeezed past the threshold, whatever the hand is near.</summary>
         public bool IsHolding => gripHeld;
 
+        /// <summary>True while the trigger alone (activate) is squeezed past the threshold.</summary>
+        public bool IsActivating => pinchHeld;
+
+        /// <summary>Trigger value on its own (0-1).</summary>
+        public float ActivateValue { get; private set; }
+
         /// <summary>Set by anything else this hand can hold (the joystick), to keep rims from competing for it.</summary>
         public bool SuppressRimGrabs { get; set; }
+
+        /// <summary>Whether a thumbstick action is actually assigned on this hand.</summary>
+        public bool HasThumbstick => thumbstickAction.action != null;
+
+        /// <summary>Thumbstick / touchpad on this controller (-1..1 each axis).</summary>
+        public Vector2 Thumbstick => thumbstickAction.action != null ? thumbstickAction.action.ReadValue<Vector2>() : Vector2.zero;
+
+        /// <summary>While true, the visual hand is drawn to ExternalSnapPoint instead of a rim.</summary>
+        public bool ExternalSnapActive { get; set; }
+
+        /// <summary>Where the visual hand should sit when ExternalSnapActive - set every frame by whatever is claiming the hand.</summary>
+        public Vector3 ExternalSnapPoint { get; set; }
+
+        /// <summary>How far onto an external target the hand is drawn before it takes hold (0-1).</summary>
+        public float InRangeVisualSnap => inRangeVisualSnap;
 
         /// <summary>Grab range in use this frame, widened when the player isn't looking at the rim.</summary>
         public float CurrentGrabDistance { get; private set; }
@@ -158,6 +183,9 @@ namespace Delirium.Wheelchair
 
             if (pinchAction.action != null && !pinchAction.action.enabled)
                 pinchAction.action.Enable();
+
+            if (thumbstickAction.action != null && !thumbstickAction.action.enabled)
+                thumbstickAction.action.Enable();
 
             // Placing the visual right before render uses the freshest tracked pose.
             Application.onBeforeRender += UpdateVisual;
@@ -197,6 +225,8 @@ namespace Delirium.Wheelchair
             }
 
             GripValue = Mathf.Max(grip, pinch);
+            ActivateValue = pinch;
+            pinchHeld = pinchHeld ? pinch > gripReleaseThreshold : pinch > gripPressThreshold;
             holdSource = GripValue <= 0.01f ? "none"
                        : Mathf.Approximately(grip, pinch) ? "grip+pinch"
                        : grip > pinch ? "grip" : "pinch";
@@ -339,7 +369,12 @@ namespace Delirium.Wheelchair
                 Vector3 targetShift = Vector3.zero;
                 PushRim rim = grippedRim != null ? grippedRim : nearRim;
 
-                if (rim != null)
+                if (ExternalSnapActive)
+                {
+                    // Something else owns this hand (the joystick); it decides where the hand sits.
+                    targetShift = ExternalSnapPoint - handPosition;
+                }
+                else if (rim != null)
                 {
                     Vector3 rimPoint = rim.ClosestRimPoint(handPosition, out _);
 

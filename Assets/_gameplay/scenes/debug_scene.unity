@@ -695,6 +695,19 @@ MonoBehaviour:
       m_Flags: 0
       m_Priority: 0
     m_Reference: {fileID: 7904272356298805229, guid: c348712bda248c246b8c49b3db54643f, type: 3}
+  thumbstickAction:
+    m_UseReference: 1
+    m_Action:
+      m_Name: Thumbstick
+      m_Type: 0
+      m_ExpectedControlType: 
+      m_Id: 42866580-173e-4648-83d6-1a7a0a7973fc
+      m_Processors: 
+      m_Interactions: 
+      m_SingletonActionBindings: []
+      m_Flags: 0
+      m_Priority: 0
+    m_Reference: {fileID: -8666952849799569744, guid: c348712bda248c246b8c49b3db54643f, type: 3}
   haptics: {fileID: 399696815}
   interactor: {fileID: 399696814}
   head: {fileID: 873231255}
@@ -1345,6 +1358,11 @@ Mesh:
       - serializedVersion: 1
         m_IndexStart: 0
         m_IndexCount: 0
+--- !u!1 &504809157 stripped
+GameObject:
+  m_CorrespondingSourceObject: {fileID: 919132149155446097, guid: 00bf528e0456ce54e80e73e41eea9ce2, type: 3}
+  m_PrefabInstance: {fileID: 1212669928}
+  m_PrefabAsset: {fileID: 0}
 --- !u!1 &598581271 stripped
 GameObject:
   m_CorrespondingSourceObject: {fileID: 5686134208185362930, guid: 1fd3a7c43c8190f4d8c167ebde694364, type: 3}
@@ -2309,6 +2327,7 @@ Transform:
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children:
+  - {fileID: 1212669929}
   - {fileID: 1914573377}
   - {fileID: 1204703223}
   - {fileID: 58832221}
@@ -2332,7 +2351,7 @@ MonoBehaviour:
   hands:
   - {fileID: 1254804634}
   - {fileID: 242230332}
-  joystick: {fileID: 0}
+  joystick: {fileID: 1212669932}
   holdToKeepMoving: 0
   straightAssistWindow: 0.25
   straightAssistRate: 6
@@ -2407,7 +2426,6 @@ Transform:
   m_ConstrainProportionsScale: 0
   m_Children:
   - {fileID: 1816554120}
-  - {fileID: 1212669929}
   m_Father: {fileID: 1122336987}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!114 &1204703224
@@ -2447,19 +2465,19 @@ PrefabInstance:
   serializedVersion: 2
   m_Modification:
     serializedVersion: 3
-    m_TransformParent: {fileID: 1204703223}
+    m_TransformParent: {fileID: 1122336987}
     m_Modifications:
     - target: {fileID: -8679921383154817045, guid: 00bf528e0456ce54e80e73e41eea9ce2, type: 3}
       propertyPath: m_LocalPosition.x
-      value: -0.3333
+      value: -0.2
       objectReference: {fileID: 0}
     - target: {fileID: -8679921383154817045, guid: 00bf528e0456ce54e80e73e41eea9ce2, type: 3}
       propertyPath: m_LocalPosition.y
-      value: 0.669
+      value: 1.125
       objectReference: {fileID: 0}
     - target: {fileID: -8679921383154817045, guid: 00bf528e0456ce54e80e73e41eea9ce2, type: 3}
       propertyPath: m_LocalPosition.z
-      value: 0.33
+      value: 0.4
       objectReference: {fileID: 0}
     - target: {fileID: -8679921383154817045, guid: 00bf528e0456ce54e80e73e41eea9ce2, type: 3}
       propertyPath: m_LocalRotation.w
@@ -2496,13 +2514,54 @@ PrefabInstance:
     m_RemovedComponents: []
     m_RemovedGameObjects: []
     m_AddedGameObjects: []
-    m_AddedComponents: []
+    m_AddedComponents:
+    - targetCorrespondingSourceObject: {fileID: 919132149155446097, guid: 00bf528e0456ce54e80e73e41eea9ce2, type: 3}
+      insertIndex: -1
+      addedObject: {fileID: 1212669932}
   m_SourcePrefab: {fileID: 100100000, guid: 00bf528e0456ce54e80e73e41eea9ce2, type: 3}
 --- !u!4 &1212669929 stripped
 Transform:
   m_CorrespondingSourceObject: {fileID: -8679921383154817045, guid: 00bf528e0456ce54e80e73e41eea9ce2, type: 3}
   m_PrefabInstance: {fileID: 1212669928}
   m_PrefabAsset: {fileID: 0}
+--- !u!114 &1212669932
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 504809157}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: f7770d9a9fb29564aa990c8ba4a456cb, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::Delirium.Wheelchair.ChairJoystick
+  leftAnchor: {fileID: 0}
+  rightAnchor: {fileID: 0}
+  handedness: 0
+  mounted: {fileID: 1212669929}
+  stickPivot: {fileID: 1319578598}
+  stickAxis: {x: 0, y: 0, z: 1}
+  mountOffsetPosition: {x: 0, y: 0, z: 0}
+  mountOffsetEuler: {x: 0, y: 0, z: 0}
+  powered: 1
+  stickMode: 1
+  allowedHand: {fileID: 1254804634}
+  grabDistance: 0.05
+  hoverVisualSnap: 1
+  nearTickAmplitude: 0.12
+  nearTickDuration: 0.03
+  breakDistance: 0.125
+  stickLength: 0.09
+  maxTiltAngle: 15
+  deadzone: 0.12
+  maxSpeed: 1.2
+  maxTurnRate: 60
+  responseRate: 10
+  thumbstickWeight: 1
+  thumbstickDeadzone: 0.15
+  driveRumble: 0.08
+  logEvents: 1
 --- !u!43 &1217046184
 Mesh:
   m_ObjectHideFlags: 0
@@ -3148,6 +3207,19 @@ MonoBehaviour:
       m_Flags: 0
       m_Priority: 0
     m_Reference: {fileID: -4289430672226363583, guid: c348712bda248c246b8c49b3db54643f, type: 3}
+  thumbstickAction:
+    m_UseReference: 1
+    m_Action:
+      m_Name: 
+      m_Type: 0
+      m_ExpectedControlType: 
+      m_Id: 39c44177-c1b8-48c3-a65d-7eddd3fd7804
+      m_Processors: 
+      m_Interactions: 
+      m_SingletonActionBindings: []
+      m_Flags: 0
+      m_Priority: 0
+    m_Reference: {fileID: -60998027439631388, guid: c348712bda248c246b8c49b3db54643f, type: 3}
   haptics: {fileID: 380036481}
   interactor: {fileID: 380036480}
   head: {fileID: 873231255}
@@ -3170,6 +3242,11 @@ MonoBehaviour:
   logEvents: 1
   drawRuntimeLine: 1
   drawLabels: 0
+--- !u!4 &1319578598 stripped
+Transform:
+  m_CorrespondingSourceObject: {fileID: -5408093446080080936, guid: 00bf528e0456ce54e80e73e41eea9ce2, type: 3}
+  m_PrefabInstance: {fileID: 1212669928}
+  m_PrefabAsset: {fileID: 0}
 --- !u!1001 &1344293039
 PrefabInstance:
   m_ObjectHideFlags: 0
