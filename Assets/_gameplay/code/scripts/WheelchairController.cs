@@ -19,6 +19,10 @@ namespace Delirium.Wheelchair
         [Tooltip("Optional powered joystick. Leave empty for a chair without one.")]
         [SerializeField] ChairJoystick joystick;
 
+        [Header("Mass")]
+        [Tooltip("Chair plus occupant (kg). Each wheel carries half. Heavier = a grab takes longer to stop the chair. Pushes are tuned separately on PushRim.")]
+        [SerializeField] float mass = 95f;
+
         [Header("Hold to keep moving")]
         [Tooltip("When on, pushing the rim and then holding it there keeps the chair rolling. When off, a held still hand brakes the wheel like a real rim. Cruise feel is tuned per wheel on PushRim.")]
         [SerializeField] bool holdToKeepMoving = true;
@@ -109,8 +113,11 @@ namespace Delirium.Wheelchair
                 return;
             }
 
-            leftRim.Bind(transform);
-            rightRim.Bind(transform);
+            // Each wheel moves half the chair. Treating the wheels as independent like this also
+            // assumes most of the mass sits about half a wheelbase from the centre, which is close
+            // enough for a seated person between the wheels.
+            leftRim.Bind(transform, mass * 0.5f);
+            rightRim.Bind(transform, mass * 0.5f);
             if (joystick != null) joystick.Bind(transform);
 
             float wheelbase = Mathf.Abs(Vector3.Dot(rightRim.HubPosition - leftRim.HubPosition, transform.right));

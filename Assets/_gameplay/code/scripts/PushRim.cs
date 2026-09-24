@@ -37,8 +37,23 @@ namespace Delirium.Wheelchair
                  "2 = a push of the same arm speed rolls the chair twice as fast. A still hand still brakes at any value.")]
         [SerializeField] float pushGain = 1f;
 
-        [Tooltip("How hard one gripping hand can speed up or brake the wheel (rad/s^2). Lower = more slip through the hand.")]
-        [SerializeField] float gripAcceleration = 30f;
+        [Tooltip("Pushes: how hard one gripping hand can speed the wheel up (rad/s^2). Deliberately not limited by the chair's mass - " +
+                 "the player's real arm meets no resistance, so a wheel that lags the hand feels like slipping, not weight.")]
+        [SerializeField] float gripAcceleration = 60f;
+
+        [Tooltip("Braking: most force a fully squeezed hand can put through the rim before the rim slides through it (N). " +
+                 "Pushed against the chair's mass, this sets how quickly a grab stops the chair.")]
+        [SerializeField] float maxGripForce = 200f;
+
+        [Tooltip("Friction while the rim is sliding through the hand, as a fraction of the holding force. " +
+                 "Below 1, a wheel that has started slipping keeps slipping until the hand has nearly caught up with it.")]
+        [Range(0.1f, 1f)] [SerializeField] float slidingFriction = 0.7f;
+
+        [Tooltip("Holding force of the lightest squeeze that still counts as a grip, as a fraction of a full squeeze. Squeezing harder brakes harder.")]
+        [Range(0f, 1f)] [SerializeField] float lightSqueezeForce = 0.35f;
+
+        [Tooltip("Speed between hand and rim (m/s) below which a sliding hand catches hold of the rim again.")]
+        [SerializeField] float regripSpeed = 0.08f;
 
         [Tooltip("Smoothing on measured hand speed, filters tracking jitter (1/s). Higher = snappier, noisier.")]
         [SerializeField] float handSpeedSmoothing = 25f;
@@ -47,7 +62,7 @@ namespace Delirium.Wheelchair
         [SerializeField] float maxHandAngularSpeed = 20f;
 
         [Header("Weight")]
-        [Tooltip("How much slip (m/s at the rim) it takes before the hand has full purchase on the wheel. Higher = a gentle hand does almost nothing and a hard shove does everything.")]
+        [Tooltip("Pushes: how much slip (m/s at the rim) it takes before the hand has full purchase on the wheel. Higher = a gentle hand does almost nothing and a hard shove does everything. Braking is friction and ignores this.")]
         [SerializeField] float gripBiteSpeed = 0.8f;
 
         [Tooltip("Shape of that build-up. 1 = straight line, higher = more of the wheel's response saved for a real shove.")]
@@ -111,10 +126,12 @@ namespace Delirium.Wheelchair
             public float heldAngle;         // signed rim travel since the grab, clamped (degrees)
             public float targetOmega;       // what this hand is pulling the wheel toward (rad/s)
             public bool scrubbing;          // pushing a stopped wheel, but not hard enough to move it
+            public bool sliding;            // the rim is slipping through the hand (kinetic friction)
         }
 
         readonly Dictionary<RimHand, Grip> grips = new Dictionary<RimHand, Grip>();
         Transform chair;
+        float supportedMass = 47.5f;
         float nextSpeedLogTime;
         bool warnedUnbound;
         LineRenderer hubLine, axleLine, rimLine;
@@ -128,7 +145,23 @@ namespace Delirium.Wheelchair
         Transform Hub => hub != null ? hub : transform;
         Vector3 Axle => ChairForGizmos().right;
 
-        public void Bind(Transform chairRoot) => chair = chairRoot;
+        /// <summary>True while any gripping hand has the rim sliding through it.</summary>
+        public bool IsSliding
+        {
+            get
+            {
+                foreach (Grip grip in grips.Values)
+                    if (grip.sliding) return true;
+                return false;
+            }
+        }
+
+        /// <param name="massOnWheel">The share of chair and occupant this wheel has to move (kg).</param>
+        public void Bind(Transform chairRoot, float massOnWheel)
+        {
+            chair = chairRoot;
+            supportedMass = Mathf.Max(massOnWheel, 1f);
+        }
 
         void OnEnable()
         {
@@ -243,7 +276,6 @@ namespace Delirium.Wheelchair
                 Vector3 hubLocal = chair.InverseTransformPoint(Hub.position);
                 Vector3 axleLocal = Vector3.right;
                 float smoothing = 1f - Mathf.Exp(-handSpeedSmoothing * dt);
-                float velocityChange = 0f;
                 bool logNow = logSpeeds && Time.time >= nextSpeedLogTime;
 
                 foreach (KeyValuePair<RimHand, Grip> entry in grips)
@@ -275,9 +307,15 @@ namespace Delirium.Wheelchair
 
                     float slip = grip.targetOmega - AngularVelocity;
 
+                    // Braking is the hand asking the wheel to turn slower than it's turning, in the
+                    // direction it's already going. Everything else, including pushing a stopped
+                    // wheel or reversing past zero, is a push.
+                    bool braking = Mathf.Abs(AngularVelocity) > 1e-4f && Mathf.Sign(slip) != Mathf.Sign(AngularVelocity);
+
                     // A stopped wheel takes a real shove to break loose. Anything gentler scrubs.
+                    // Never while braking, or a wheel slowed into this band would creep on forever.
                     bool stopped = Mathf.Abs(GroundSpeed) < stictionSpeed;
-                    bool tooWeak = stopped && Mathf.Abs(grip.targetOmega) * rimRadius < breakawaySpeed;
+                    bool tooWeak = !braking && stopped && Mathf.Abs(grip.targetOmega) * rimRadius < breakawaySpeed;
 
                     if (tooWeak)
                     {
@@ -295,26 +333,53 @@ namespace Delirium.Wheelchair
                         if (breakawayRumble > 0f) entry.Key.SendRumble(breakawayRumble, 0.05f);
                     }
 
-                    // The harder the hand outruns the wheel, the more of the wheel it actually gets.
-                    // A slow hand slides over the rim; a shove bites.
-                    float bite = Mathf.Pow(Mathf.Clamp01(Mathf.Abs(slip) * rimRadius / Mathf.Max(gripBiteSpeed, 0.01f)), gripBiteCurve);
+                    float maxStep;
+                    float holdForce = 0f;
 
-                    // Each hand drags the wheel toward its target, limited by grip strength. A hand
-                    // drifting off the rim loosens its hold, so pulling away after a fast push
-                    // doesn't brake the wheel on the way out - it behaves like letting go.
-                    float maxStep = gripAcceleration * entry.Key.GripStrength * bite * dt;
-                    velocityChange += Mathf.Clamp(slip, -maxStep, maxStep);
+                    if (braking)
+                    {
+                        // The hand is friction on the rim, holding back the chair's mass. A harder
+                        // squeeze holds harder, and a hand drifting off the rim loosens its hold, so
+                        // pulling away after a fast push doesn't brake the wheel on the way out.
+                        float squeeze = Mathf.Lerp(lightSqueezeForce, 1f, entry.Key.Squeeze);
+                        holdForce = maxGripForce * squeeze * entry.Key.GripStrength;
+                        float holdStep = RimForceToAngularAcceleration(holdForce) * dt;
+
+                        // Static friction until the hand asks for more than it can hold; then the rim
+                        // slides through at the lower sliding friction until the two nearly match again.
+                        // Grabbing a fast wheel therefore slows the chair over a short skid instead of
+                        // stopping it dead.
+                        bool wasSliding = grip.sliding;
+                        if (grip.sliding && Mathf.Abs(slip) * rimRadius < regripSpeed) grip.sliding = false;
+                        else if (!grip.sliding && Mathf.Abs(slip) > holdStep) grip.sliding = true;
+
+                        if (logSpeeds && grip.sliding != wasSliding)
+                            Debug.Log($"[PushRim {name}] {entry.Key.name} {(grip.sliding ? "SLIDING on" : "caught")} the rim at {GroundSpeed:0.00} m/s (squeeze {entry.Key.Squeeze:P0})", this);
+
+                        maxStep = grip.sliding ? holdStep * slidingFriction : holdStep;
+                    }
+                    else
+                    {
+                        // The harder the hand outruns the wheel, the more of the wheel it actually gets.
+                        // A slow hand slides over the rim; a shove bites.
+                        float bite = Mathf.Pow(Mathf.Clamp01(Mathf.Abs(slip) * rimRadius / Mathf.Max(gripBiteSpeed, 0.01f)), gripBiteCurve);
+                        maxStep = gripAcceleration * entry.Key.GripStrength * bite * dt;
+                        grip.sliding = false;
+                    }
+
+                    // Applied hand by hand, so two hands on one rim can't overshoot the target together.
+                    AngularVelocity += Mathf.Clamp(slip, -maxStep, maxStep);
 
                     if (logNow)
                         Debug.Log($"[PushRim {name}] {entry.Key.name}: hand speed {handVelocity.magnitude:0.00} m/s " +
                                   $"(along rim {Vector3.Dot(handVelocity, tangent):0.00} m/s), hand omega raw {rawOmega:0.00} x gain {pushGain:0.00}, " +
-                                  $"smoothed {grip.handOmega:0.00} rad/s, held {grip.heldAngle:0}deg, grip {entry.Key.GripStrength:P0}{(grip.scrubbing ? " SCRUBBING" : "")} -> target {grip.targetOmega:0.00} rad/s | wheel {AngularVelocity:0.00} rad/s, ground {GroundSpeed:0.00} m/s", this);
+                                  $"smoothed {grip.handOmega:0.00} rad/s, held {grip.heldAngle:0}deg, grip {entry.Key.GripStrength:P0}, squeeze {entry.Key.Squeeze:P0}, " +
+                                  $"{(braking ? $"BRAKING {holdForce:0} N" : "pushing")}{(grip.sliding ? " SLIDING" : "")}{(grip.scrubbing ? " SCRUBBING" : "")} " +
+                                  $"-> target {grip.targetOmega:0.00} rad/s | wheel {AngularVelocity:0.00} rad/s, ground {GroundSpeed:0.00} m/s", this);
                 }
 
                 if (logNow)
                     nextSpeedLogTime = Time.time + speedLogInterval;
-
-                AngularVelocity += velocityChange;
             }
             else
             {
@@ -359,6 +424,16 @@ namespace Delirium.Wheelchair
 
             // Front of the rim, so the grabbable ring's size is visible in the headset.
             DebugLines.Set(rimLine, centre, centre + Vector3.Cross(axle, up).normalized * rimRadius, state);
+        }
+
+        /// <summary>
+        /// Wheel spin-up (rad/s^2) from a force applied at the hand rim. The rim's lever arm is
+        /// shorter than the tyre's, so the ground sees F * rim / tyre, and that pushes this wheel's
+        /// share of the chair and occupant.
+        /// </summary>
+        float RimForceToAngularAcceleration(float force)
+        {
+            return force * rimRadius / (supportedMass * tireRadius * tireRadius);
         }
 
         float CombineWithCruise(Grip grip)

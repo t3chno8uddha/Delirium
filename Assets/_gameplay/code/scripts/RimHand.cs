@@ -124,6 +124,9 @@ namespace Delirium.Wheelchair
         /// <summary>Whichever of grip or trigger is squeezed harder (0-1).</summary>
         public float GripValue { get; private set; }
 
+        /// <summary>How hard the hand is squeezing beyond the lightest hold (0 = just holding, 1 = fully squeezed).</summary>
+        public float Squeeze => Mathf.InverseLerp(gripReleaseThreshold, 1f, GripValue);
+
         /// <summary>True while grip or trigger is squeezed past the threshold, whatever the hand is near.</summary>
         public bool IsHolding => gripHeld;
 
