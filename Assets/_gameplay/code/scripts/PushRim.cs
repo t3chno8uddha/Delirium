@@ -46,6 +46,22 @@ namespace Delirium.Wheelchair
         [Tooltip("Measured hand speed around the hub is clamped to this (rad/s), so a tracking glitch can't fling the chair.")]
         [SerializeField] float maxHandAngularSpeed = 20f;
 
+        [Header("Weight")]
+        [Tooltip("How much slip (m/s at the rim) it takes before the hand has full purchase on the wheel. Higher = a gentle hand does almost nothing and a hard shove does everything.")]
+        [SerializeField] float gripBiteSpeed = 0.8f;
+
+        [Tooltip("Shape of that build-up. 1 = straight line, higher = more of the wheel's response saved for a real shove.")]
+        [SerializeField] float gripBiteCurve = 1.5f;
+
+        [Tooltip("A wheel moving slower than this (m/s on the ground) counts as stopped, and has to be broken loose.")]
+        [SerializeField] float stictionSpeed = 0.08f;
+
+        [Tooltip("How fast the hand must move along the rim (m/s) to break a stopped wheel loose. Below this it just scrubs.")]
+        [SerializeField] float breakawaySpeed = 0.35f;
+
+        [Tooltip("Rumble when a stopped wheel breaks loose, so the effort has a moment to it.")]
+        [SerializeField] float breakawayRumble = 0.5f;
+
         [Header("Coasting")]
         [Tooltip("Constant deceleration while no hand grips (rad/s^2).")]
         [SerializeField] float rollingResistance = 0.6f;
@@ -94,6 +110,7 @@ namespace Delirium.Wheelchair
             public float handOmega;         // smoothed hand speed around the hub (rad/s)
             public float heldAngle;         // signed rim travel since the grab, clamped (degrees)
             public float targetOmega;       // what this hand is pulling the wheel toward (rad/s)
+            public bool scrubbing;          // pushing a stopped wheel, but not hard enough to move it
         }
 
         readonly Dictionary<RimHand, Grip> grips = new Dictionary<RimHand, Grip>();
@@ -256,16 +273,42 @@ namespace Delirium.Wheelchair
 
                     grip.targetOmega = holdToKeepMoving ? CombineWithCruise(grip) : grip.handOmega;
 
+                    float slip = grip.targetOmega - AngularVelocity;
+
+                    // A stopped wheel takes a real shove to break loose. Anything gentler scrubs.
+                    bool stopped = Mathf.Abs(GroundSpeed) < stictionSpeed;
+                    bool tooWeak = stopped && Mathf.Abs(grip.targetOmega) * rimRadius < breakawaySpeed;
+
+                    if (tooWeak)
+                    {
+                        if (!grip.scrubbing && logSpeeds)
+                            Debug.Log($"[PushRim {name}] {entry.Key.name} is pushing too gently to break the wheel loose " +
+                                      $"({Mathf.Abs(grip.targetOmega) * rimRadius:0.00} m/s of {breakawaySpeed:0.00} needed)", this);
+                        grip.scrubbing = true;
+                        continue;
+                    }
+
+                    if (grip.scrubbing)
+                    {
+                        // It just gave way: a kick, so the effort reads as effort.
+                        grip.scrubbing = false;
+                        if (breakawayRumble > 0f) entry.Key.SendRumble(breakawayRumble, 0.05f);
+                    }
+
+                    // The harder the hand outruns the wheel, the more of the wheel it actually gets.
+                    // A slow hand slides over the rim; a shove bites.
+                    float bite = Mathf.Pow(Mathf.Clamp01(Mathf.Abs(slip) * rimRadius / Mathf.Max(gripBiteSpeed, 0.01f)), gripBiteCurve);
+
                     // Each hand drags the wheel toward its target, limited by grip strength. A hand
                     // drifting off the rim loosens its hold, so pulling away after a fast push
                     // doesn't brake the wheel on the way out - it behaves like letting go.
-                    float maxStep = gripAcceleration * entry.Key.GripStrength * dt;
-                    velocityChange += Mathf.Clamp(grip.targetOmega - AngularVelocity, -maxStep, maxStep);
+                    float maxStep = gripAcceleration * entry.Key.GripStrength * bite * dt;
+                    velocityChange += Mathf.Clamp(slip, -maxStep, maxStep);
 
                     if (logNow)
                         Debug.Log($"[PushRim {name}] {entry.Key.name}: hand speed {handVelocity.magnitude:0.00} m/s " +
                                   $"(along rim {Vector3.Dot(handVelocity, tangent):0.00} m/s), hand omega raw {rawOmega:0.00} x gain {pushGain:0.00}, " +
-                                  $"smoothed {grip.handOmega:0.00} rad/s, held {grip.heldAngle:0}deg, grip {entry.Key.GripStrength:P0} -> target {grip.targetOmega:0.00} rad/s | wheel {AngularVelocity:0.00} rad/s, ground {GroundSpeed:0.00} m/s", this);
+                                  $"smoothed {grip.handOmega:0.00} rad/s, held {grip.heldAngle:0}deg, grip {entry.Key.GripStrength:P0}{(grip.scrubbing ? " SCRUBBING" : "")} -> target {grip.targetOmega:0.00} rad/s | wheel {AngularVelocity:0.00} rad/s, ground {GroundSpeed:0.00} m/s", this);
                 }
 
                 if (logNow)
@@ -278,6 +321,10 @@ namespace Delirium.Wheelchair
                 float deceleration = (rollingResistance + Mathf.Abs(AngularVelocity) * linearDrag) * dt;
                 AngularVelocity = Mathf.MoveTowards(AngularVelocity, 0f, deceleration);
             }
+
+            // Don't let the wheel creep along below the speed it takes to break it loose.
+            if (!IsGripped && Mathf.Abs(GroundSpeed) < stictionSpeed * 0.5f)
+                AngularVelocity = 0f;
 
             AngularVelocity = Mathf.Clamp(AngularVelocity, -maxAngularSpeed, maxAngularSpeed);
 

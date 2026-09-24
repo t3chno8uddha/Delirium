@@ -169,11 +169,16 @@ MonoBehaviour:
   rimRadius: 0.5
   tireRadius: 0.6
   pushGain: 1
-  gripAcceleration: 18
+  gripAcceleration: 60
   handSpeedSmoothing: 25
   maxHandAngularSpeed: 20
-  rollingResistance: 0.5
-  linearDrag: 0.05
+  gripBiteSpeed: 1.5
+  gripBiteCurve: 1.5
+  stictionSpeed: 0.08
+  breakawaySpeed: 0.35
+  breakawayRumble: 0.5
+  rollingResistance: 0.35
+  linearDrag: 0.03
   maxAngularSpeed: 25
   cruiseDeadzoneAngle: 6
   cruiseFullAngle: 45
@@ -2397,7 +2402,7 @@ Transform:
   m_GameObject: {fileID: 1204703222}
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: 0, y: 0.5, z: -0.125}
+  m_LocalPosition: {x: 0, y: 0.5, z: 0}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children:
@@ -7539,11 +7544,16 @@ MonoBehaviour:
   rimRadius: 0.5
   tireRadius: 0.6
   pushGain: 1
-  gripAcceleration: 18
+  gripAcceleration: 60
   handSpeedSmoothing: 25
   maxHandAngularSpeed: 20
-  rollingResistance: 0.5
-  linearDrag: 0.05
+  gripBiteSpeed: 1.5
+  gripBiteCurve: 1.5
+  stictionSpeed: 0.08
+  breakawaySpeed: 0.35
+  breakawayRumble: 0.5
+  rollingResistance: 0.35
+  linearDrag: 0.03
   maxAngularSpeed: 25
   cruiseDeadzoneAngle: 6
   cruiseFullAngle: 45
